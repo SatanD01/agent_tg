@@ -1,0 +1,6 @@
+# Файлы для игнорирования
+node_modules/
+.env
+logs/
+*.log
+.DS_Store

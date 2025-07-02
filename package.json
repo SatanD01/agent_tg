@@ -1,0 +1,21 @@
+{
+  "name": "telegram-hotel-bot",
+  "version": "1.0.0", 
+  "description": "Simple Telegram bot for hotel search",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "setup-webhook": "node setup_webhook.js",
+    "test-dialogflow": "node test_dialogflow.js"
+  },
+  "dependencies": {
+    "@google-cloud/dialogflow-cx": "2.7.0",
+    "axios": "^0.21.1",
+    "body-parser": "^1.19.0",
+    "dotenv": "^10.0.0",
+    "express": "^4.17.1"
+  },
+  "engines": {
+    "node": "8.x"
+  }
+}

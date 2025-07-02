@@ -4,4 +4,3 @@ node_modules/
 logs/
 *.log
 .DS_Store
-service-account-key.json

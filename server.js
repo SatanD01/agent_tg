@@ -124,7 +124,7 @@ function parseHotelsFromResponse(responseText) {
   return hotels;
 }
 
-// Создание карточки отеля
+// Создание карточки отеля - ИСПРАВЛЕНО
 function createHotelCard(hotel, hotelIndex, totalHotels, currentPage = 1, totalPages = null) {
   const stars = '⭐'.repeat(hotel.stars || 0);
   
@@ -132,19 +132,21 @@ function createHotelCard(hotel, hotelIndex, totalHotels, currentPage = 1, totalP
   
   const keyboard = [];
   
-  // Навигация по отелям в текущем списке
-  const navRow = [];
-  if (hotelIndex > 0) {
-    navRow.push({ text: '⬅️ Предыдущий', callback_data: `hotel_${hotelIndex - 1}` });
-  }
-  if (hotelIndex < totalHotels - 1) {
-    navRow.push({ text: 'Следующий ➡️', callback_data: `hotel_${hotelIndex + 1}` });
-  }
-  if (navRow.length > 0) {
-    keyboard.push(navRow);
+  // Навигация по отелям в текущем списке - показываем только если есть другие отели
+  if (totalHotels > 1) {
+    const navRow = [];
+    if (hotelIndex > 0) {
+      navRow.push({ text: '⬅️ Предыдущий', callback_data: `hotel_${hotelIndex - 1}` });
+    }
+    if (hotelIndex < totalHotels - 1) {
+      navRow.push({ text: 'Следующий ➡️', callback_data: `hotel_${hotelIndex + 1}` });
+    }
+    if (navRow.length > 0) {
+      keyboard.push(navRow);
+    }
   }
   
-  // Навигация по страницам
+  // Навигация по страницам - ВСЕГДА показываем эту строку
   const pageRow = [];
   if (currentPage > 1) {
     pageRow.push({ text: '⬅️ Пред. страница', callback_data: `page_${currentPage - 1}` });
@@ -156,9 +158,11 @@ function createHotelCard(hotel, hotelIndex, totalHotels, currentPage = 1, totalP
   
   // Всегда показываем кнопку "следующая страница" 
   pageRow.push({ text: 'След. страница ➡️', callback_data: `page_${currentPage + 1}` });
+  
+  // ВСЕГДА добавляем строку навигации по страницам
   keyboard.push(pageRow);
   
-  // Кнопки действий
+  // Кнопки действий - ВСЕГДА показываем
   keyboard.push([
     { text: '📞 Связаться с менеджером', callback_data: `contact_${hotel.id}` },
     { text: '📋 Подробнее об отеле', callback_data: `detail_${hotel.id}` }
@@ -178,8 +182,10 @@ function createHotelCard(hotel, hotelIndex, totalHotels, currentPage = 1, totalP
   };
 }
 
-// Функция для обработки HTML тегов
+// Функция для обработки HTML тегов - ИСПРАВЛЕНО
 function processHtmlTags(text) {
+  if (!text) return '';
+  
   let cleanText = text;
   
   // Заменяем HTML теги на Markdown и очищаем
@@ -196,6 +202,7 @@ function processHtmlTags(text) {
     .replace(/<ul[^>]*>/gi, '\n')                     // <ul> -> новая строка
     .replace(/<\/ul>/gi, '\n')                        // </ul> -> новая строка
     .replace(/<[^>]*>/g, '')                          // удаляем остальные HTML теги
+    .replace(/\*\*([^*]+)\*\*/g, '*$1*')              // ** -> * для markdown
     .replace(/\n{3,}/g, '\n\n')                       // убираем лишние переносы
     .replace(/^\s+|\s+$/gm, '')                       // убираем пробелы в начале/конце строк
     .trim();
@@ -203,9 +210,9 @@ function processHtmlTags(text) {
   return cleanText;
 }
 
-// Парсинг деталей отеля из ответа DialogFlow
+// Парсинг деталей отеля из ответа DialogFlow - ЗНАЧИТЕЛЬНО УЛУЧШЕНО
 function parseHotelDetails(responseText) {
-  console.log('🔍 Parsing hotel details:', responseText.substring(0, 200));
+  console.log('🔍 Parsing hotel details:', responseText.substring(0, 500));
   
   let hotelDetails = {
     name: '',
@@ -216,16 +223,16 @@ function parseHotelDetails(responseText) {
   };
   
   try {
-    // Извлекаем название отеля
-    const nameMatch = responseText.match(/\*\*([^*]+)\*\*/);
+    // Извлекаем название отеля (первая строка с **)
+    const nameMatch = responseText.match(/\*\*([^*\n]+)\*\*/);
     if (nameMatch) {
-      hotelDetails.name = nameMatch[1];
+      hotelDetails.name = nameMatch[1].trim();
     }
     
-    // Извлекаем место
+    // Извлекаем место из строки "Местоположение:"
     const placeMatch = responseText.match(/\*\*Местоположение:\*\*\s*([^\n]+)/);
     if (placeMatch) {
-      hotelDetails.place = placeMatch[1];
+      hotelDetails.place = placeMatch[1].trim();
     }
     
     // Извлекаем звезды (если есть)
@@ -234,47 +241,46 @@ function parseHotelDetails(responseText) {
       hotelDetails.star = parseInt(starMatch[1]);
     }
     
-    // Извлекаем URL изображения
-    const imgMatch = responseText.match(/\[URL изображения:\s*(https?:\/\/[^\]]+)\]/);
+    // Извлекаем URL изображения - ищем любые URL в квадратных скобках или прямые ссылки
+    const imgMatch = responseText.match(/\[(https?:\/\/[^\]\s]+)\]|\*\*Фото отеля:\*\*\s*\[(https?:\/\/[^\]\s]+)\]|(https:\/\/i\.travelapi\.com[^\s\]]+)/);
     if (imgMatch) {
-      hotelDetails.img = imgMatch[1];
+      hotelDetails.img = imgMatch[1] || imgMatch[2] || imgMatch[3];
     }
     
-    // Извлекаем описание отеля
-    const descMatch = responseText.match(/\*\*Описание:\*\*\s*([^*]+?)(?=\*\*|$)/s);
-    if (descMatch) {
-      hotelDetails.description.location = descMatch[1].trim();
-    }
+    // Более гибкое извлечение секций описания
+    const sections = [
+      { key: 'location', patterns: [/\*\*Описание:\*\*\s*([\s\S]*?)(?=\n\*\*|$)/] },
+      { key: 'amenities', patterns: [/\*\*Удобства:\*\*\s*([\s\S]*?)(?=\n\*\*|$)/] },
+      { key: 'rooms', patterns: [/\*\*Номера:\*\*\s*([\s\S]*?)(?=\n\*\*|$)/] },
+      { key: 'business_amenities', patterns: [/\*\*Бизнес-удобства:\*\*\s*([\s\S]*?)(?=\n\*\*|$)/] },
+      { key: 'attractions', patterns: [/\*\*Достопримечательности:\*\*\s*([\s\S]*?)(?=\n\*\*|Ближайший|$)/] }
+    ];
     
-    // Извлекаем удобства
-    const amenitiesMatch = responseText.match(/\*\*Удобства:\*\*\s*([^*]+?)(?=\*\*|$)/s);
-    if (amenitiesMatch) {
-      hotelDetails.description.amenities = amenitiesMatch[1].trim();
-    }
+    sections.forEach(section => {
+      for (const pattern of section.patterns) {
+        const match = responseText.match(pattern);
+        if (match && match[1] && match[1].trim()) {
+          hotelDetails.description[section.key] = match[1].trim();
+          break;
+        }
+      }
+    });
     
-    // Извлекаем информацию о номерах
-    const roomsMatch = responseText.match(/\*\*Номера:\*\*\s*([^*]+?)(?=\*\*|$)/s);
-    if (roomsMatch) {
-      hotelDetails.description.rooms = roomsMatch[1].trim();
-    }
-    
-    // Извлекаем бизнес-удобства
-    const businessMatch = responseText.match(/\*\*Бизнес-удобства:\*\*\s*([^*]+?)(?=\*\*|$)/s);
-    if (businessMatch) {
-      hotelDetails.description.business_amenities = businessMatch[1].trim();
-    }
-    
-    // Извлекаем достопримечательности
-    const attractionsMatch = responseText.match(/\*\*Достопримечательности:\*\*\s*([\s\S]*?)(?=\*\*|Ближайший|$)/);
-    if (attractionsMatch) {
-      hotelDetails.description.attractions = attractionsMatch[1].trim();
+    // Если ничего не найдено, попробуем извлечь весь текст как есть
+    if (!Object.keys(hotelDetails.description).length) {
+      // Убираем заголовок отеля и берем остальное как описание
+      const cleanText = responseText.replace(/^\*\*[^*]+\*\*\s*\n*/g, '').trim();
+      if (cleanText) {
+        hotelDetails.description.location = cleanText;
+      }
     }
     
     console.log('✅ Parsed hotel details:', {
       name: hotelDetails.name,
       place: hotelDetails.place,
       star: hotelDetails.star,
-      hasImage: !!hotelDetails.img
+      hasImage: !!hotelDetails.img,
+      sectionsFound: Object.keys(hotelDetails.description)
     });
     
   } catch (error) {
@@ -284,7 +290,7 @@ function parseHotelDetails(responseText) {
   return hotelDetails;
 }
 
-// Форматирование деталей отеля для отправки в Telegram
+// Форматирование деталей отеля для отправки в Telegram - ЗНАЧИТЕЛЬНО УЛУЧШЕНО
 function formatHotelDetailsForTelegram(hotelDetails, originalText) {
   let formattedText = '';
   
@@ -330,8 +336,24 @@ function formatHotelDetailsForTelegram(hotelDetails, originalText) {
     formattedText += `🗺 *Достопримечательности:*\n${processHtmlTags(hotelDetails.description.attractions)}\n\n`;
   }
   
-  // Если ничего не удалось извлечь, используем оригинальный текст
-  if (!formattedText.trim()) {
+  // Если у нас есть хотя бы основная информация, но мало деталей, добавляем оригинальный текст
+  if (formattedText.trim()) {
+    // Если у нас мало информации (только название и место), добавляем оригинальный текст
+    const sectionsCount = Object.keys(hotelDetails.description).length;
+    if (sectionsCount <= 1) {
+      // Убираем дублирование заголовка и добавляем остальной текст
+      let additionalText = originalText;
+      if (hotelDetails.name) {
+        additionalText = additionalText.replace(new RegExp(`\\*\\*${hotelDetails.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\*\\*`, 'gi'), '');
+      }
+      additionalText = processHtmlTags(additionalText).trim();
+      
+      if (additionalText && additionalText.length > 50) {
+        formattedText += `\n📝 *Дополнительная информация:*\n${additionalText}`;
+      }
+    }
+  } else {
+    // Если ничего не удалось извлечь, используем весь оригинальный текст
     formattedText = processHtmlTags(originalText);
   }
   
@@ -521,7 +543,7 @@ app.post(URI, async (req, res) => {
                   media: {
                     type: 'photo',
                     media: hotelCard.photo,
-                    caption: hotelCard.caption,
+                    caption: hotelCard.caption + `\n\n✅ Страница ${newPage} - найдено ${hotels.length} отелей`,
                     parse_mode: 'Markdown'
                   },
                   reply_markup: hotelCard.reply_markup
@@ -529,20 +551,28 @@ app.post(URI, async (req, res) => {
               } catch (editError) {
                 await axios.post(`${API_URL}/sendPhoto`, {
                   chat_id: chatId,
-                  ...hotelCard
+                  photo: hotelCard.photo,
+                  caption: hotelCard.caption + `\n\n✅ Страница ${newPage} - найдено ${hotels.length} отелей`,
+                  parse_mode: hotelCard.parse_mode,
+                  reply_markup: hotelCard.reply_markup
                 });
               }
               
-              // Информационное сообщение
-              await axios.post(`${API_URL}/sendMessage`, {
-                chat_id: chatId,
-                text: `✅ Страница ${newPage} - найдено ${hotels.length} отелей`
-              });
+              // УБИРАЕМ отдельное информационное сообщение
+              // await axios.post(`${API_URL}/sendMessage`, {
+              //   chat_id: chatId,
+              //   text: `✅ Страница ${newPage} - найдено ${hotels.length} отелей`
+              // });
               
             } else {
               await axios.post(`${API_URL}/sendMessage`, {
                 chat_id: chatId,
-                text: `❌ На странице ${newPage} отели не найдены`
+                text: `❌ На странице ${newPage} отели не найдены`,
+                reply_markup: {
+                  inline_keyboard: [[
+                    { text: '🔍 Новый поиск', callback_data: 'new_search' }
+                  ]]
+                }
               });
             }
           }
@@ -550,7 +580,12 @@ app.post(URI, async (req, res) => {
           console.error('❌ Ошибка получения страницы:', pageError);
           await axios.post(`${API_URL}/sendMessage`, {
             chat_id: chatId,
-            text: `❌ Ошибка загрузки страницы ${newPage}. Попробуйте еще раз.`
+            text: `❌ Ошибка загрузки страницы ${newPage}. Попробуйте еще раз.`,
+            reply_markup: {
+              inline_keyboard: [[
+                { text: '🔍 Новый поиск', callback_data: 'new_search' }
+              ]]
+            }
           });
         }
         return;
@@ -627,7 +662,7 @@ app.post(URI, async (req, res) => {
         
         try {
           // Отправляем запрос в Dialogflow для получения деталей отеля
-          const response = await queryDialogflowForHotelDetails(`покажи подробнее об отеле ${hotelId}`, chatId);
+          const response = await queryDialogflowForHotelDetails(`дай детальное описание об отеле ${hotelId}`, chatId);
           
           if (response.queryResult.responseMessages) {
             const responseText = response.queryResult.responseMessages
@@ -728,310 +763,327 @@ app.post(URI, async (req, res) => {
       return;
     }
     
-// Обработка текстовых сообщений
-   if (!req.body?.message?.text) {
-     return;
-   }
-   
-   const chatId = req.body.message.chat.id;
-   const messageText = req.body.message.text;
-   
-   console.log('💬 Сообщение:', messageText);
-   
-   // Команда /start
-   if (messageText === '/start') {
-     await axios.post(`${API_URL}/sendMessage`, {
-       chat_id: chatId,
-       text: `🏨 *Поиск отелей в Анталии*\n\n👋 Привет! Я помогу найти отель в Анталии\n\n✨ Просто напишите:\n• "найди отель завтра на неделю"\n• "отель с 25 декабря по 1 января"\n• "отель на выходные для 2 человек"\n• "покажи страницу 2" - для навигации\n• "подробнее об отеле 12345" - детали отеля`,
-       parse_mode: 'Markdown'
-     });
-     return;
-   }
-   
-   // Проверяем, является ли это командой деталей отеля
-   const hotelDetailMatch = messageText.match(/подробнее\s+об\s+отеле\s+(\d+)|детали\s+отеля\s+(\d+)|отель\s+(\d+)\s+подробнее/i);
-   if (hotelDetailMatch) {
-     const hotelId = hotelDetailMatch[1] || hotelDetailMatch[2] || hotelDetailMatch[3];
-     
-     console.log(`🏨 Текстовый запрос деталей отеля ID: ${hotelId}`);
-     
-     await axios.post(`${API_URL}/sendChatAction`, {
-       chat_id: chatId,
-       action: 'typing'
-     });
-     
-     try {
-       const response = await queryDialogflowForHotelDetails(`покажи подробнее об отеле ${hotelId}`, chatId);
-       
-       if (response.queryResult.responseMessages) {
-         const responseText = response.queryResult.responseMessages
-           .map(msg => msg.text ? msg.text.text.join('') : '')
-           .join('\n');
-         
-         // Парсим детали отеля
-         const hotelDetails = parseHotelDetails(responseText);
-         
-         // Форматируем для Telegram
-         const formattedText = formatHotelDetailsForTelegram(hotelDetails, responseText);
-         
-         // Добавляем кнопку "Назад к списку" если есть активная сессия
-         const userSession = userSessions.get(chatId);
-         let replyMarkup = null;
-         
-         if (userSession && userSession.hotels && userSession.hotels.length > 0) {
-           replyMarkup = {
-             inline_keyboard: [
-               [
-                 { text: '⬅️ Назад к списку отелей', callback_data: `back_to_list` }
-               ],
-               [
-                 { text: '📞 Связаться с менеджером', callback_data: `contact_${hotelId}` }
-               ]
-             ]
-           };
-         } else {
-           replyMarkup = {
-             inline_keyboard: [
-               [
-                 { text: '📞 Связаться с менеджером', callback_data: `contact_${hotelId}` }
-               ],
-               [
-                 { text: '🔍 Новый поиск', callback_data: 'new_search' }
-               ]
-             ]
-           };
-         }
-         
-         // Отправляем детали отеля с изображением если есть
-         if (hotelDetails.img) {
-           try {
-             await axios.post(`${API_URL}/sendPhoto`, {
-               chat_id: chatId,
-               photo: hotelDetails.img,
-               caption: formattedText,
-               parse_mode: 'Markdown',
-               reply_markup: replyMarkup
-             });
-           } catch (photoError) {
-             console.log('⚠️ Ошибка отправки фото, отправляем как текст');
-             await axios.post(`${API_URL}/sendMessage`, {
-               chat_id: chatId,
-               text: formattedText + `\n\n📷 Фото: ${hotelDetails.img}`,
-               parse_mode: 'Markdown',
-               reply_markup: replyMarkup
-             });
-           }
-         } else {
-           await axios.post(`${API_URL}/sendMessage`, {
-             chat_id: chatId,
-             text: formattedText,
-             parse_mode: 'Markdown',
-             reply_markup: replyMarkup
-           });
-         }
-       } else {
-         await axios.post(`${API_URL}/sendMessage`, {
-           chat_id: chatId,
-           text: '❌ Не удалось получить детальную информацию об отеле'
-         });
-       }
-     } catch (error) {
-       console.error('❌ Ошибка получения деталей отеля через текст:', error);
-       await axios.post(`${API_URL}/sendMessage`, {
-         chat_id: chatId,
-         text: '❌ Ошибка получения информации об отеле. Попробуйте еще раз.'
-       });
-     }
-     return;
-   }
-   
-   // Проверяем, является ли это командой страницы
-   const requestedPage = isPageCommand(messageText);
-   const userSession = userSessions.get(chatId);
-   
-   if (requestedPage && userSession && userSession.lastSearchText) {
-     console.log(`📄 Запрос страницы ${requestedPage} через текст`);
-     
-     // Показываем индикатор "печатает"
-     await axios.post(`${API_URL}/sendChatAction`, {
-       chat_id: chatId,
-       action: 'typing'
-     });
-     
-     try {
-       const response = await queryDialogflowForHotels(userSession.lastSearchText, chatId, requestedPage);
-       
-       if (response.queryResult.responseMessages) {
-         const responseText = response.queryResult.responseMessages
-           .map(msg => msg.text ? msg.text.text.join('') : '')
-           .join('\n');
-         
-         const hotels = parseHotelsFromResponse(responseText);
-         
-         if (hotels.length > 0) {
-           // Обновляем сессию
-           userSession.hotels = hotels;
-           userSession.currentHotelIndex = 0;
-           userSession.currentPage = requestedPage;
-           userSessions.set(chatId, userSession);
-           
-           // Отправляем первый отель
-           const hotelCard = createHotelCard(hotels[0], 0, hotels.length, requestedPage);
-           
-           try {
-             await axios.post(`${API_URL}/sendPhoto`, {
-               chat_id: chatId,
-               ...hotelCard
-             });
-           } catch (photoError) {
-             await axios.post(`${API_URL}/sendMessage`, {
-               chat_id: chatId,
-               text: `🏨 ${hotelCard.caption}\n\n📷 Фото: ${hotelCard.photo || 'недоступно'}`,
-               parse_mode: hotelCard.parse_mode,
-               reply_markup: hotelCard.reply_markup
-             });
-           }
-           
-           await axios.post(`${API_URL}/sendMessage`, {
-             chat_id: chatId,
-             text: `✅ Страница ${requestedPage} - найдено ${hotels.length} отелей`
-           });
-           
-         } else {
-           await axios.post(`${API_URL}/sendMessage`, {
-             chat_id: chatId,
-             text: `❌ На странице ${requestedPage} отели не найдены`
-           });
-         }
-       }
-     } catch (error) {
-       console.error('❌ Ошибка получения страницы через текст:', error);
-       await axios.post(`${API_URL}/sendMessage`, {
-         chat_id: chatId,
-         text: `❌ Ошибка загрузки страницы ${requestedPage}. Попробуйте еще раз.`
-       });
-     }
-     return;
-   }
-   
-   // Показываем индикатор "печатает"
-   await axios.post(`${API_URL}/sendChatAction`, {
-     chat_id: chatId,
-     action: 'typing'
-   });
-   
-   // Отправляем запрос в Dialogflow CX
-   const response = await queryDialogflowForHotels(messageText, chatId, 1);
-   
-   // Обрабатываем ответ
-   if (response.queryResult.responseMessages) {
-     const responseText = response.queryResult.responseMessages
-       .map(msg => msg.text ? msg.text.text.join('') : '')
-       .join('\n');
-     
-     console.log('📝 Полный ответ от Dialogflow:', responseText);
-     
-     // Парсим отели из ответа
-     const hotels = parseHotelsFromResponse(responseText);
-     
-     if (hotels.length > 0) {
-       // Сохраняем отели в сессии
-       userSessions.set(chatId, {
-         hotels: hotels,
-         currentHotelIndex: 0,
-         currentPage: 1,
-         lastSearchText: messageText
-       });
-       
-       // Отправляем первый отель
-       try {
-         const hotelCard = createHotelCard(hotels[0], 0, hotels.length, 1);
-         
-         // Проверяем URL фото
-         if (hotelCard.photo && hotelCard.photo.startsWith('http')) {
-           await axios.post(`${API_URL}/sendPhoto`, {
-             chat_id: chatId,
-             ...hotelCard
-           });
-         } else {
-           // Если фото недоступно, отправляем как текст
-           await axios.post(`${API_URL}/sendMessage`, {
-             chat_id: chatId,
-             text: hotelCard.caption,
-             parse_mode: hotelCard.parse_mode,
-             reply_markup: hotelCard.reply_markup
-           });
-         }
-         
-       } catch (photoError) {
-         console.log('⚠️ Photo error, sending as text:', photoError.message);
-         
-         // Fallback - отправляем как текстовое сообщение
-         const hotelCard = createHotelCard(hotels[0], 0, hotels.length, 1);
-         await axios.post(`${API_URL}/sendMessage`, {
-           chat_id: chatId,
-           text: `🏨 ${hotelCard.caption}\n\n📷 Фото: ${hotelCard.photo || 'недоступно'}`,
-           parse_mode: hotelCard.parse_mode,
-           reply_markup: hotelCard.reply_markup
-         });
-       }
-       
-       // Информационное сообщение
-       await axios.post(`${API_URL}/sendMessage`, {
-         chat_id: chatId,
-         text: `✅ Найдено ${hotels.length} отелей на этой странице\n\n👆 Используйте кнопки для навигации или напишите "покажи страницу X"`
-       });
-       
-     } else {
-       // Обычный текстовый ответ
-       await axios.post(`${API_URL}/sendMessage`, {
-         chat_id: chatId,
-         text: responseText || 'Не понял ваш запрос. Попробуйте еще раз.'
-       });
-     }
-   } else {
-     await axios.post(`${API_URL}/sendMessage`, {
-       chat_id: chatId,
-       text: 'Извините, произошла ошибка. Попробуйте еще раз.'
-     });
-   }
-   
- } catch (error) {
-   console.error('❌ Ошибка webhook:', error);
-   
-   const chatId = req.body?.message?.chat?.id || req.body?.callback_query?.message?.chat?.id;
-   if (chatId) {
-     try {
-       await axios.post(`${API_URL}/sendMessage`, {
-         chat_id: chatId,
-         text: '⚠️ Произошла ошибка. Попробуйте еще раз или обратитесь к @asialuxe_manager'
-       });
-     } catch (sendError) {
-       console.error('❌ Ошибка отправки сообщения об ошибке:', sendError);
-     }
-   }
- }
+    // Обработка текстовых сообщений
+    if (!req.body?.message?.text) {
+      return;
+    }
+    
+    const chatId = req.body.message.chat.id;
+    const messageText = req.body.message.text;
+    
+    console.log('💬 Сообщение:', messageText);
+    
+    // Команда /start
+    if (messageText === '/start') {
+      await axios.post(`${API_URL}/sendMessage`, {
+        chat_id: chatId,
+        text: `🏨 *Поиск отелей в Анталии*\n\n👋 Привет! Я помогу найти отель в Анталии\n\n✨ Просто напишите:\n• "найди отель завтра на неделю"\n• "отель с 25 декабря по 1 января"\n• "отель на выходные для 2 человек"\n• "покажи страницу 2" - для навигации\n• "подробнее об отеле 12345" - детали отеля`,
+        parse_mode: 'Markdown'
+      });
+      return;
+    }
+    
+    // Проверяем, является ли это командой деталей отеля
+    const hotelDetailMatch = messageText.match(/подробнее\s+об\s+отеле\s+(\d+)|детали\s+отеля\s+(\d+)|отель\s+(\d+)\s+подробнее/i);
+    if (hotelDetailMatch) {
+      const hotelId = hotelDetailMatch[1] || hotelDetailMatch[2] || hotelDetailMatch[3];
+      
+      console.log(`🏨 Текстовый запрос деталей отеля ID: ${hotelId}`);
+      
+      await axios.post(`${API_URL}/sendChatAction`, {
+        chat_id: chatId,
+        action: 'typing'
+      });
+      
+      try {
+        const response = await queryDialogflowForHotelDetails(`дай детальное описание об отеле ${hotelId}`, chatId);
+        
+        if (response.queryResult.responseMessages) {
+          const responseText = response.queryResult.responseMessages
+            .map(msg => msg.text ? msg.text.text.join('') : '')
+            .join('\n');
+          
+          // Парсим детали отеля
+          const hotelDetails = parseHotelDetails(responseText);
+          
+          // Форматируем для Telegram
+          const formattedText = formatHotelDetailsForTelegram(hotelDetails, responseText);
+          
+          // Добавляем кнопку "Назад к списку" если есть активная сессия
+          const userSession = userSessions.get(chatId);
+          let replyMarkup = null;
+          
+          if (userSession && userSession.hotels && userSession.hotels.length > 0) {
+            replyMarkup = {
+              inline_keyboard: [
+                [
+                  { text: '⬅️ Назад к списку отелей', callback_data: `back_to_list` }
+                ],
+                [
+                  { text: '📞 Связаться с менеджером', callback_data: `contact_${hotelId}` }
+                ]
+              ]
+            };
+          } else {
+            replyMarkup = {
+              inline_keyboard: [
+                [
+                  { text: '📞 Связаться с менеджером', callback_data: `contact_${hotelId}` }
+                ],
+                [
+                  { text: '🔍 Новый поиск', callback_data: 'new_search' }
+                ]
+              ]
+            };
+          }
+          
+          // Отправляем детали отеля с изображением если есть
+          if (hotelDetails.img) {
+            try {
+              await axios.post(`${API_URL}/sendPhoto`, {
+                chat_id: chatId,
+                photo: hotelDetails.img,
+                caption: formattedText,
+                parse_mode: 'Markdown',
+                reply_markup: replyMarkup
+              });
+            } catch (photoError) {
+              console.log('⚠️ Ошибка отправки фото, отправляем как текст');
+              await axios.post(`${API_URL}/sendMessage`, {
+                chat_id: chatId,
+                text: formattedText + `\n\n📷 Фото: ${hotelDetails.img}`,
+                parse_mode: 'Markdown',
+                reply_markup: replyMarkup
+              });
+            }
+          } else {
+            await axios.post(`${API_URL}/sendMessage`, {
+              chat_id: chatId,
+              text: formattedText,
+              parse_mode: 'Markdown',
+              reply_markup: replyMarkup
+            });
+          }
+        } else {
+          await axios.post(`${API_URL}/sendMessage`, {
+            chat_id: chatId,
+            text: '❌ Не удалось получить детальную информацию об отеле'
+          });
+        }
+      } catch (error) {
+        console.error('❌ Ошибка получения деталей отеля через текст:', error);
+        await axios.post(`${API_URL}/sendMessage`, {
+          chat_id: chatId,
+          text: '❌ Ошибка получения информации об отеле. Попробуйте еще раз.'
+        });
+      }
+      return;
+    }
+    
+    // Проверяем, является ли это командой страницы
+    const requestedPage = isPageCommand(messageText);
+    const userSession = userSessions.get(chatId);
+
+    if (requestedPage && userSession && userSession.lastSearchText) {
+      console.log(`📄 Запрос страницы ${requestedPage} через текст`);
+      
+      // Показываем индикатор "печатает"
+      await axios.post(`${API_URL}/sendChatAction`, {
+        chat_id: chatId,
+        action: 'typing'
+      });
+      
+      try {
+        const response = await queryDialogflowForHotels(userSession.lastSearchText, chatId, requestedPage);
+        
+        if (response.queryResult.responseMessages) {
+          const responseText = response.queryResult.responseMessages
+            .map(msg => msg.text ? msg.text.text.join('') : '')
+            .join('\n');
+          
+          const hotels = parseHotelsFromResponse(responseText);
+          
+          if (hotels.length > 0) {
+            // Обновляем сессию
+            userSession.hotels = hotels;
+            userSession.currentHotelIndex = 0;
+            userSession.currentPage = requestedPage;
+            userSessions.set(chatId, userSession);
+            
+            // Отправляем первый отель С ИНФОРМАЦИЕЙ О СТРАНИЦЕ В CAPTION
+            const hotelCard = createHotelCard(hotels[0], 0, hotels.length, requestedPage);
+            
+            try {
+              await axios.post(`${API_URL}/sendPhoto`, {
+                chat_id: chatId,
+                photo: hotelCard.photo,
+                caption: hotelCard.caption + `\n\n✅ Страница ${requestedPage} - найдено ${hotels.length} отелей`,
+                parse_mode: hotelCard.parse_mode,
+                reply_markup: hotelCard.reply_markup
+              });
+            } catch (photoError) {
+              await axios.post(`${API_URL}/sendMessage`, {
+                chat_id: chatId,
+                text: `🏨 ${hotelCard.caption}\n\n📷 Фото: ${hotelCard.photo || 'недоступно'}\n\n✅ Страница ${requestedPage} - найдено ${hotels.length} отелей`,
+                parse_mode: hotelCard.parse_mode,
+                reply_markup: hotelCard.reply_markup
+              });
+            }
+            
+            // УБИРАЕМ отдельное информационное сообщение
+            // await axios.post(`${API_URL}/sendMessage`, {
+            //   chat_id: chatId,
+            //   text: `✅ Страница ${requestedPage} - найдено ${hotels.length} отелей`
+            // });
+            
+          } else {
+            await axios.post(`${API_URL}/sendMessage`, {
+              chat_id: chatId,
+              text: `❌ На странице ${requestedPage} отели не найдены`,
+              reply_markup: {
+                inline_keyboard: [[
+                  { text: '🔍 Новый поиск', callback_data: 'new_search' }
+                ]]
+              }
+            });
+          }
+        }
+      } catch (error) {
+        console.error('❌ Ошибка получения страницы через текст:', error);
+        await axios.post(`${API_URL}/sendMessage`, {
+          chat_id: chatId,
+          text: `❌ Ошибка загрузки страницы ${requestedPage}. Попробуйте еще раз.`,
+          reply_markup: {
+            inline_keyboard: [[
+              { text: '🔍 Новый поиск', callback_data: 'new_search' }
+            ]]
+          }
+        });
+      }
+      return;
+    }
+    
+    // Показываем индикатор "печатает"
+    await axios.post(`${API_URL}/sendChatAction`, {
+      chat_id: chatId,
+      action: 'typing'
+    });
+    
+    // Отправляем запрос в Dialogflow CX
+    const response = await queryDialogflowForHotels(messageText, chatId, 1);
+    
+    // Обрабатываем ответ
+    if (response.queryResult.responseMessages) {
+      const responseText = response.queryResult.responseMessages
+        .map(msg => msg.text ? msg.text.text.join('') : '')
+        .join('\n');
+      
+      console.log('📝 Полный ответ от Dialogflow:', responseText);
+      
+      // Парсим отели из ответа
+      const hotels = parseHotelsFromResponse(responseText);
+
+      if (hotels.length > 0) {
+        // Сохраняем отели в сессии
+        userSessions.set(chatId, {
+          hotels: hotels,
+          currentHotelIndex: 0,
+          currentPage: 1,
+          lastSearchText: messageText
+        });
+        
+        // Отправляем первый отель
+        try {
+          const hotelCard = createHotelCard(hotels[0], 0, hotels.length, 1);
+          
+          // Проверяем URL фото
+          if (hotelCard.photo && hotelCard.photo.startsWith('http')) {
+            await axios.post(`${API_URL}/sendPhoto`, {
+              chat_id: chatId,
+              photo: hotelCard.photo,
+              caption: hotelCard.caption + `\n\n✅ Найдено ${hotels.length} отелей на этой странице\n\n👆 Используйте кнопки для навигации или напишите "покажи страницу X"`,
+              parse_mode: hotelCard.parse_mode,
+              reply_markup: hotelCard.reply_markup
+            });
+          } else {
+            // Если фото недоступно, отправляем как текст
+            await axios.post(`${API_URL}/sendMessage`, {
+              chat_id: chatId,
+              text: hotelCard.caption + `\n\n✅ Найдено ${hotels.length} отелей на этой странице\n\n👆 Используйте кнопки для навигации или напишите "покажи страницу X"`,
+              parse_mode: hotelCard.parse_mode,
+              reply_markup: hotelCard.reply_markup
+            });
+          }
+          
+        } catch (photoError) {
+          console.log('⚠️ Photo error, sending as text:', photoError.message);
+          
+          // Fallback - отправляем как текстовое сообщение
+          const hotelCard = createHotelCard(hotels[0], 0, hotels.length, 1);
+          await axios.post(`${API_URL}/sendMessage`, {
+            chat_id: chatId,
+            text: `🏨 ${hotelCard.caption}\n\n📷 Фото: ${hotelCard.photo || 'недоступно'}\n\n✅ Найдено ${hotels.length} отелей на этой странице\n\n👆 Используйте кнопки для навигации или напишите "покажи страницу X"`,
+            parse_mode: hotelCard.parse_mode,
+            reply_markup: hotelCard.reply_markup
+          });
+        }
+        
+        // УБИРАЕМ отдельное информационное сообщение
+        // await axios.post(`${API_URL}/sendMessage`, {
+        //   chat_id: chatId,
+        //   text: `✅ Найдено ${hotels.length} отелей на этой странице\n\n👆 Используйте кнопки для навигации или напишите "покажи страницу X"`
+        // });
+        
+      } else {
+        // Обычный текстовый ответ
+        await axios.post(`${API_URL}/sendMessage`, {
+          chat_id: chatId,
+          text: responseText || 'Не понял ваш запрос. Попробуйте еще раз.'
+        });
+      }
+    } else {
+      await axios.post(`${API_URL}/sendMessage`, {
+        chat_id: chatId,
+        text: 'Извините, произошла ошибка. Попробуйте еще раз.'
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Ошибка webhook:', error);
+    
+    const chatId = req.body?.message?.chat?.id || req.body?.callback_query?.message?.chat?.id;
+    if (chatId) {
+      try {
+        await axios.post(`${API_URL}/sendMessage`, {
+          chat_id: chatId,
+          text: '⚠️ Произошла ошибка. Попробуйте еще раз или обратитесь к @asialuxe_manager'
+        });
+      } catch (sendError) {
+        console.error('❌ Ошибка отправки сообщения об ошибке:', sendError);
+      }
+    }
+  }
 });
 
 // Настройка webhook
 async function setupWebhook() {
- try {
-   const response = await axios.post(`${API_URL}/setWebhook`, {
-     url: WEBHOOK,
-     allowed_updates: ['message', 'callback_query']
-   });
-   console.log('✅ Webhook настроен:', response.data);
- } catch (error) {
-   console.error('❌ Ошибка настройки webhook:', error.message);
- }
+  try {
+    const response = await axios.post(`${API_URL}/setWebhook`, {
+      url: WEBHOOK,
+      allowed_updates: ['message', 'callback_query']
+    });
+    console.log('✅ Webhook настроен:', response.data);
+  } catch (error) {
+    console.error('❌ Ошибка настройки webhook:', error.message);
+  }
 }
 
 // Запуск сервера
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
- console.log(`🚀 Сервер запущен на порту ${PORT}`);
- console.log(`🔗 Webhook URL: ${WEBHOOK}`);
- setupWebhook();
+  console.log(`🚀 Сервер запущен на порту ${PORT}`);
+  console.log(`🔗 Webhook URL: ${WEBHOOK}`);
+  setupWebhook();
 });
 
 module.exports = app;
